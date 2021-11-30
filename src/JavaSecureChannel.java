@@ -10,8 +10,6 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 
 
-
-
 public class JavaSecureChannel {
 
     private static int port = 0;
@@ -22,10 +20,14 @@ public class JavaSecureChannel {
     public static void main(String[] args) {
         try {
             initChannel();
-        } catch (IOException e) {
+        } catch (Exception e) {
+            System.out.println("Welp");
             e.printStackTrace();
         }
     }
+
+    /* Look at the below library to transform the channel into a secure channel
+     * https://docs.oracle.com/javase/6/docs/technotes/guides/security/jaas/JAASRefGuide.html*/
 
     /* Function to Read the data in the pipeline into the cache using socketChannel's read method */
 
@@ -99,20 +101,6 @@ public class JavaSecureChannel {
 
         socketChannel.close();
     }
-
-
-
-//    public static Socket createSocket (String host) {
-//        ServerSocket serverSocket = null;
-//        Socket socket = null;
-//        try {
-//            serverSocket = new ServerSocket(port);
-//            socket = serverSocket.accept();
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
-//        return socket;
-//    }
     
     public static void writeFileToSocket (String fileName) {
         int sockPort = 400;
