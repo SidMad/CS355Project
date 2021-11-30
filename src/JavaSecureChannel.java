@@ -12,17 +12,31 @@ import java.nio.channels.SocketChannel;
 
 public class JavaSecureChannel {
 
-    private static int port = 0;
+    private static int port = 8081;
 
     private JavaSecureChannel(int port) {
         this.port = port;
     }
     public static void main(String[] args) {
-        try {
-            initChannel();
-        } catch (Exception e) {
-            System.out.println("Welp");
-            e.printStackTrace();
+        if (args.length < 1) {
+            System.out.println("Please specify client or server");
+            System.exit(0);
+        }
+        if (args[0].equals("client")) {
+            JavaSecureChannel jsc = new JavaSecureChannel(port);
+            try {
+                jsc.connectServer("Hello Server!");
+            } catch (IOException e) {
+                System.out.println("Problem connecting to Server - Try running server before client");
+                e.printStackTrace();
+            }
+        } else {
+            try {
+                initChannel();
+            } catch (Exception e) {
+                System.out.println("Welp");
+                e.printStackTrace();
+            }
         }
     }
 
@@ -47,11 +61,12 @@ public class JavaSecureChannel {
         ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
 
         while (true) {
-            System.out.println("-------Server side-----Start receiving-----Client Connection---------");
+//            System.out.println("-------Server side-----Start receiving-----Client Connection---------");
             // On the server side, receive a link from the client and return a link if there is a client.
-
+            System.out.println("Server Running");
             SocketChannel socketChannel = serverSocketChannel.accept();
             if (socketChannel != null) {
+                System.out.println("we have accepted a client");
                 while (true) {
                     // Clear cache data, new data can be received
                     byteBuffer.clear();
@@ -59,13 +74,14 @@ public class JavaSecureChannel {
                     // Read the data from the pipe socketChannel into the cache byteBuffer
                     // ReadSize denotes the number of bytes read
                     int readSize = socketChannel.read(byteBuffer);
-                    if (readSize == -1) {
+                    //if (readSize == -1) {
+                    if (readSize < 0) {
                         break;
                     }
 
                     // Note that the byte type used . Therefore, we need to convert
                     String message = new String(byteBuffer.array());
-//                    System.out.println(new String(byteBuffer.array()));
+                    System.out.println(new String(byteBuffer.array()));
                 }
             }
             try {
@@ -76,8 +92,8 @@ public class JavaSecureChannel {
         }
     }
 
-
-    public void connectServer() throws IOException{
+// client code
+    public void connectServer(String initialMessage) throws IOException{
         // Create a SocketChannel object,
         // Please note that there is no link to the server side.
         SocketChannel socketChannel = SocketChannel.open();
@@ -86,9 +102,9 @@ public class JavaSecureChannel {
         socketChannel.connect(new InetSocketAddress("localhost", port));
 
         //Create a byte buffer on the client side
-        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+        ByteBuffer byteBuffer = ByteBuffer.allocate(24);
 
-        String msg = ""; // TODO Get the message
+        String msg = initialMessage; // TODO Get the message
 
         //To the byte buffer, add data
         byteBuffer.put(msg.getBytes());
@@ -98,7 +114,6 @@ public class JavaSecureChannel {
             //Write the data in the byte cache into the pipeline
             socketChannel.write(byteBuffer);
         }
-
         socketChannel.close();
     }
     
