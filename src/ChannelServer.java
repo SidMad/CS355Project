@@ -20,11 +20,27 @@ public class ChannelServer {
     }
 
     private void start(){
+        ServerSocketChannel serverSocketChannel = null;
+        SocketChannel socketChannel = null;
         try {
-            ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+            // Server side, create Server Socket Channel
+            serverSocketChannel = ServerSocketChannel.open();
+            // Binding port number
+            serverSocketChannel.bind(new InetSocketAddress(port));
         }
         catch(Exception e){
+            System.out.println("Failed to create socket");
             e.printStackTrace();
+        }
+        // On the server side, receive a link from the client
+        try {
+            socketChannel = serverSocketChannel.accept();
+        } catch (Exception e) {
+            System.out.println("Failed to connect");
+            e.printStackTrace();
+        }
+        if (socketChannel != null) {
+            // TODO
         }
 
     }
