@@ -1,3 +1,5 @@
+
+
 import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.File;
@@ -8,7 +10,6 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-
 
 public class JavaSecureChannel {
 
@@ -27,7 +28,6 @@ public class JavaSecureChannel {
             try {
                 jsc.connectServer("Hello Server!");
             } catch (IOException e) {
-                System.out.println("Problem connecting to Server - Try running server before client");
                 e.printStackTrace();
             }
         } else {
@@ -61,21 +61,19 @@ public class JavaSecureChannel {
         ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
 
         while (true) {
-//            System.out.println("-------Server side-----Start receiving-----Client Connection---------");
+            System.out.println("-------Server side-----Start receiving-----Client Connection---------");
             // On the server side, receive a link from the client and return a link if there is a client.
-            System.out.println("Server Running");
+
             SocketChannel socketChannel = serverSocketChannel.accept();
             if (socketChannel != null) {
                 System.out.println("we have accepted a client");
                 while (true) {
                     // Clear cache data, new data can be received
                     byteBuffer.clear();
-
                     // Read the data from the pipe socketChannel into the cache byteBuffer
                     // ReadSize denotes the number of bytes read
                     int readSize = socketChannel.read(byteBuffer);
-                    //if (readSize == -1) {
-                    if (readSize < 0) {
+                    if (readSize == -1) {
                         break;
                     }
 
@@ -92,7 +90,7 @@ public class JavaSecureChannel {
         }
     }
 
-// client code
+    // client code
     public void connectServer(String initialMessage) throws IOException{
         // Create a SocketChannel object,
         // Please note that there is no link to the server side.
@@ -102,7 +100,7 @@ public class JavaSecureChannel {
         socketChannel.connect(new InetSocketAddress("localhost", port));
 
         //Create a byte buffer on the client side
-        ByteBuffer byteBuffer = ByteBuffer.allocate(24);
+        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
 
         String msg = initialMessage; // TODO Get the message
 
@@ -116,7 +114,7 @@ public class JavaSecureChannel {
         }
         socketChannel.close();
     }
-    
+
     public static void writeFileToSocket (String fileName) {
         int sockPort = 400;
         FileInputStream fis = null;
@@ -161,9 +159,9 @@ public class JavaSecureChannel {
                 try {
                     servsock.close();
                 }
-            catch (Exception e){
-                System.out.println("Nothing");
-            }
+                catch (Exception e){
+                    System.out.println("Nothing");
+                }
         }
     }
 
