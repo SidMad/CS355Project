@@ -5,225 +5,377 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.security.*;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Random;
+import java.nio.charset.StandardCharsets;
+
+
+/*
+`   Read in public key and secret key from their file.
+    Read in the file with the passwords and generate its hash.
+
+    Attempt to connect to the server at the host, if no such server exists skip to Alice's code,
+    if it does exist, skip to Bob's code.
+
+    Alice:
+        Start server
+        When a client connects, generate and send a signed SALT (counter).
+        Wait for a message from the other party with their signature,
+            Verify the public key and signature is indeed Bob's and continue
+            If the connecting client is not Bob, let Alice know.
+        Otherwise, sign and send our hashed (password.txt+salt)
+            Wait for a signed hash of (password.txt+salt) from Bob.
+            skip to Both:
+
+    Bob:
+        Wait for a signed salt message from Alice.
+            If signature does not match Alice's, abort protocol.
+        Wait for a signed hash of the file containing the passwords from Alice.
+        Create a signed hash of (password.txt+salt) .
+        skip to Both:
+
+    Both:
+        If the transmitted hash matches our hash, return "has file". Else, return "has different file" and terminate.
+
+
+     Alice Method, Bob Method, Contractor class for shared methods and Constructor
+
+ */
+
 
 public class JavaSecureChannel {
 
-    private static int port = 8081;
+    private static final int port = 8081;
     private static final int MAX_SIZE = 1024;
+    private static final int HASHED_SIZE = 512;
+    private static final int BUFFER_SIZE = 16384;
 
-    private JavaSecureChannel(int port) {
-        this.port = port;
-    }
+    private final String passwordsFilePath;
+    private PrivateKey mySecretKey;
+    private PublicKey theirPublicKey;
 
-    public static void main(String[] args) {
-        if (args.length < 1) {
-            System.out.println("Please specify client or server");
+// private JavaSecureChannel(int port, String passwordsFilePath, String theirPublicKeyFilepath, String myPrivateKeyFilepath ) {
+    private JavaSecureChannel(String passwordsFilePath, String theirPublicKeyFilepath, String myPrivateKeyFilepath ) {
+
+        // this.port = port; //TODO port should be a command line argument so if multiple published
+        this.passwordsFilePath = passwordsFilePath;
+
+        if(!verifyPath(passwordsFilePath) ) {
+            System.out.println("Path to password file is Invalid");
             System.exit(0);
         }
-        if (args[0].equals("client")) {
-            JavaSecureChannel jsc = new JavaSecureChannel(port);
-            try {
-                jsc.connectServer("Hello Server!");
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        } else {
-            try {
-                initChannel();
-            } catch (Exception e) {
-                System.out.println("Welp");
-                e.printStackTrace();
-            }
+        if(!verifyPath(theirPublicKeyFilepath)) {
+            System.out.println("Path to Public Key file is Invalid");
+            System.exit(0);
         }
-    }
+        if(!verifyPath(myPrivateKeyFilepath) ) {
+            System.out.println("Path to your Private Key file is Invalid");
+            System.exit(0);
+        }
+        KeyFactory kf = null;
 
-    /* Look at the below library to transform the channel into a secure channel
-     * https://docs.oracle.com/javase/6/docs/technotes/guides/security/jaas/JAASRefGuide.html*/
+        /*
+         * Code to convert byte[] to PrivateKey and PublicKey
+         * Code from https://stackoverflow.com/questions/19353748/how-to-convert-byte-array-to-privatekey-or-publickey-type/22077915
+         */
+        try {
+            kf = KeyFactory.getInstance("RSA");
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("Unable to create RSA Key Factory");
+            e.printStackTrace();
+        }
 
-    /* Function to Read the data in the pipeline into the cache using socketChannel's read method */
+        if (kf == null) {
+            System.out.println("Key Factory is null - abort");
+            System.exit(0);
+        }
 
-    public static void initChannel() throws IOException {
+        try {
+            mySecretKey = kf.generatePrivate(new PKCS8EncodedKeySpec(readFile(myPrivateKeyFilepath)));
+            theirPublicKey = kf.generatePublic(new X509EncodedKeySpec(readFile(theirPublicKeyFilepath)));
+        } catch (InvalidKeySpecException e) {
+            System.out.println("Error Generating Key");
+            e.printStackTrace();
+        } catch (IOException e) {
+            System.out.println("Error Reading Key");
+            e.printStackTrace();
+        } catch (NullPointerException e) {
+            System.out.println("Null Pointer detected while creating/reading key");
+        }
+        if (mySecretKey == null) {
+            System.out.println("Secret key could not be read");
+            System.exit(0);
+        }
+        if (theirPublicKey == null) {
+            System.out.println("Secret key could not be read");
+            System.exit(0);
+        }
+    } /* JavaSecureChannel() */
+
+    public static void main(String[] args) {
+
+        if (args.length < 3) {
+            System.out.println("Please invoke with arguments [path to passwords.txt file], [filepath to other contractor's public key], [filepath to my secret key]");
+            System.exit(0);
+        }
+//        JavaSecureChannel jsc = new JavaSecureChannel(port, args[0],args[1],args[2]);
+        JavaSecureChannel jsc = new JavaSecureChannel(args[0],args[1],args[2]);
+
+        try {
+            jsc.Bob("Connected to Server!");
+        } catch (ConnectException e) {
+            System.out.println("Alice isn't out there, SAD! You're Alice");
+            try {
+                jsc.Alice();
+            } catch (Exception general) {
+                System.out.println("Problem Initialising server");
+                general.printStackTrace();
+            }
+        } catch (IOException e) {
+            System.out.println("Cannot connect to server");
+            e.printStackTrace();
+        }
+    } /* main() */
+
+
+    /*
+     * Look at the below library to transform the channel into a secure channel
+     * https://docs.oracle.com/javase/6/docs/technotes/guides/security/jaas/JAASRefGuide.html
+     * Function to Read the data in the pipeline into the cache using socketChannel's read method
+     */
+
+    public void Alice() throws IOException {
         // Server side, create Server Socket Channel through open method
         // Note that at this point, the server side has not yet bound the port.
 
-        System.out.println("About to Init Channel");
+        System.out.println("Alice is in play");
+        byte[] salt = new byte[HASHED_SIZE];
+        new Random().nextBytes(salt);
+
+        String generatedSalt  = new String(salt, StandardCharsets.UTF_8); //can remove if salt itself is byte[]
 
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
-
+        SocketChannel socketChannel = null;
         // Binding port number
         serverSocketChannel.bind(new InetSocketAddress(port));
-
 
         // Create a byte buffer The size of the buffer is 1024 bytes
         ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
 
         while (true) {
-            System.out.println("-------Server side-----Start receiving-----Client Connection---------");
+            System.out.println("------- Alice is waiting---------");
             // On the server side, receive a link from the client and return a link if there is a client.
-
-            SocketChannel socketChannel = serverSocketChannel.accept();
+            try {
+                socketChannel = serverSocketChannel.accept();
+            } catch (Exception e){
+                System.out.println("Exception occurred while trying to receive a link from the client ");
+            }
             if (socketChannel != null) {
                 System.out.println("we have accepted a client");
+                try {
+                    sendMessage(generatedSalt.getBytes(), socketChannel);
+                } catch (IOException e) {
+                    System.out.println("Unable to send message");
+                    e.printStackTrace();
+                    // TODO have appropriate action
+                }
                 while (true) {
+
+                    //ready to wait for bob to send his hash
                     // Clear cache data, new data can be received
                     byteBuffer.clear();
                     // Read the data from the pipe socketChannel into the cache byteBuffer
                     // ReadSize denotes the number of bytes read
                     int readSize = socketChannel.read(byteBuffer);
-                    if (readSize == -1) {
+                    if (readSize == -1) { // Should if condition be readSize != -1
+                        // Abort or return plaintext
+                        String receivedHash = receiveMessage(byteBuffer.array());
+                        // Hash the password file
+                        byte[] passwords = hashFile(passwordsFilePath, salt);
+                        // Send hash and signature to Bob
+                        sendMessage(passwords,socketChannel);
+                        // Compare the hashes and print appropriate message
+                        finishProtocol(receivedHash, new String(passwords));
                         break;
                     }
-
-                    // Note that the byte type used . Therefore, we need to convert
-                    String message = new String(byteBuffer.array());
-                    System.out.println(new String(byteBuffer.array()));
                 }
             }
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+            // try {
+                // Thread.sleep(1000);
+            // } catch (InterruptedException e) {
+                // e.printStackTrace();
+            // }
         }
+    } /* Alice() */
+
+
+    public void finishProtocol(String myHash, String theirHash) {
+        if (theirHash.equals(myHash)) {
+            System.out.println("The other contractor has the same file!");
+        } else {
+            System.out.println("The other contractor made contact but has a different file!");
+        }
+        System.exit(0);
     }
 
     // client code
-    public void connectServer(String initialMessage) throws IOException{
-        // Create a SocketChannel object,
-        // Please note that there is no link to the server side.
+    public void Bob(String initialMessage) throws IOException, ConnectException{
+
+        // @Andrew initialMessage is never used - Do we need it?
+
         SocketChannel socketChannel = SocketChannel.open();
-
-        //Start linking the server side
         socketChannel.connect(new InetSocketAddress("localhost", port));
-
-        //Create a byte buffer on the client side
         ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
-
-        String msg = initialMessage; // TODO Get the message
-
-        // Send message across the socket
-        sendMessage(msg, socketChannel);
-
-        //To the byte buffer, add data
-//        byteBuffer.put(msg.getBytes());
-//        // For updating the limit value, the value is updated to position for subsequent reads
-//        byteBuffer.flip();
-//        while(byteBuffer.hasRemaining()) {
-//            //Write the data in the byte cache into the pipeline
-//            socketChannel.write(byteBuffer);
-//        }
-
-        // Close connection
+        byte[] myHash;
+        //wait for salt
+        //
+        while (true) {
+            // Clear cache data, new data can be received
+            byteBuffer.clear();
+            // Read the data from the pipe socketChannel into the cache byteBuffer
+            // ReadSize denotes the number of bytes read
+            int readSize = socketChannel.read(byteBuffer);
+            if (readSize == -1) {
+                String salt = receiveMessage(byteBuffer.array());
+//                salt.getBytes(); //TODO is this the right way to cast?
+                myHash = hashFile(passwordsFilePath, salt.getBytes());
+                sendMessage(myHash,socketChannel);
+                break;
+            }
+        }
+        while (true) {
+            // Clear cache data, new data can be received
+            byteBuffer.clear();
+            // Read the data from the pipe socketChannel into the cache byteBuffer
+            // ReadSize denotes the number of bytes read
+            int readSize = socketChannel.read(byteBuffer);
+            if (readSize == -1) {
+                finishProtocol(new String(myHash), receiveMessage(byteBuffer.array()));
+                break;
+            }
+        }
         socketChannel.close();
     } /* connectServer() */
 
-    /* public static void writeFileToSocket (String fileName) {
-        int sockPort = 400;
-        FileInputStream fis = null;
-        BufferedInputStream bis = null;
-        OutputStream os = null;
-        ServerSocket servsock = null;
-        Socket sock = null;
+
+/*from https://stackoverflow.com/questions/1741545/java-calculate-sha-256-hash-of-large-file-efficiently*/
+    public byte[] hashFile(String filepath, byte[] salt) throws IOException { //TODO create a hash of the password file
+
+        byte[] partialHash = null;
+        byte[] buffer = new byte[BUFFER_SIZE];
+        RandomAccessFile file = null;
         try {
-            servsock = new ServerSocket(sockPort);
-            while (true) {
-                System.out.println("Waiting...");
-                try {
-                    sock = servsock.accept();
-                    System.out.println("Accepted connection : " + sock);
-                    // send file
-                    File myFile = new File(fileName);
-                    byte[] mybytearray = new byte[(int) myFile.length()];
-                    fis = new FileInputStream(myFile);
-                    bis = new BufferedInputStream(fis);
-                    bis.read(mybytearray, 0, mybytearray.length);
-                    os = sock.getOutputStream();
-                    System.out.println("Sending " + fileName + "(" + mybytearray.length + " bytes)");
-                    os.write(mybytearray, 0, mybytearray.length);
-                    os.flush();
-                    System.out.println("Done.");
-                } catch (IOException ex) {
-                    System.out.println(ex.getMessage() + ": An Inbound Connection Was Not Resolved");
-                }
-                finally{
-                    if (bis != null) bis.close();
-                    if (os != null) os.close();
-                    if (sock != null) sock.close();
-                }
+            // RandomAccessFile file = new RandomAccessFile("T:\\someLargeFile.m2v", "r");
+            file = new RandomAccessFile(filepath, "r");
+
+            long startTime = System.nanoTime();
+            MessageDigest hashSum = null;
+            try {
+                hashSum = MessageDigest.getInstance("SHA-256");
+            } catch (NoSuchAlgorithmException e) {
+                System.out.println("Unable to Hash Message");
+                e.printStackTrace();
             }
+            if (hashSum == null) {
+                // TODO Action to take if hash is null
+                System.exit(0);
+            }
+            long read = 0;
 
-        }
-        catch (IOException ex){
-
-        }
-        finally {
-            if (servsock != null)
+            // calculate the hash of the whole file for the test
+            long offset = file.length();
+            int unitsize;
+            while (read < offset) {
+                unitsize = (int) (((offset - read) >= BUFFER_SIZE) ? BUFFER_SIZE : (offset - read));
+                file.read(buffer, 0, unitsize);
                 try {
-                    servsock.close();
+                    hashSum.update(buffer, 0, unitsize);
+                } catch (NullPointerException e) {
+                    System.out.println("Null Pointer Detected - HashSum failed to update");
+                    e.printStackTrace();
                 }
-                catch (Exception e){
-                    System.out.println("Nothing");
-                }
+                read += unitsize;
+            }
+            // file.close();
+            partialHash = new byte[hashSum.getDigestLength()];
+            partialHash = hashSum.digest();
+            long endTime = System.nanoTime();
+            System.out.println("End time - Start time = " + (endTime - startTime) + " nano seconds");
+        } catch (FileNotFoundException e) {
+            System.out.println("The file to hash could not be found");
+            e.printStackTrace();
         }
-    } /* writeFileToSocket() */
+        finally{
+            if (file != null)
+                file.close();
+        }
+        return partialHash;
+    } /* hashFile() */
 
-    public static void sendMessage(String msg, SocketChannel socketChannel) throws IOException{
+    /* public static byte[][] genKeyPairBytes(int keySize) throws NoSuchAlgorithmException, NoSuchProviderException {
+        byte[][] keyPairBytes = new byte[2][];
+        KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA", "SunRsaSign");
+        gen.initialize(keySize, new SecureRandom());
+        KeyPair pair = gen.generateKeyPair();
+        keyPairBytes[0] = pair.getPrivate().getEncoded();
+        keyPairBytes[1] = pair.getPublic().getEncoded();
+        return keyPairBytes;
+    } /* genKeyPairBytes() */
+
+    //Verify signature and return without the tag
+    public String receiveMessage(byte[] msg) { //TODO either abort with a "not the person you think" or return the plaintext of the message
+        //return the message without the little trailing signature verifier
+        String combined = new String(msg, StandardCharsets.UTF_8);
+        String[] both = combined.split("PADDING");
+        byte[] hash = both[0].getBytes(StandardCharsets.UTF_8);
+        byte[] signature = both[1].getBytes(StandardCharsets.UTF_8);
+        boolean ver = CryptoMethods.verifyHash(theirPublicKey, hash, signature);
+        String answer;
+        if (ver) {
+            answer = both[0];
+            return answer;
+        }
+        else {
+            answer = "not the person you think";
+            System.out.println(answer);
+            System.exit(0);
+        }
+        return null;
+    }
+
+    //create the tag for the message and send it
+    public void sendMessage(byte[] msg, SocketChannel socketChannel) throws IOException {
+        /*
+         * Code to convert byte buffer to string: String s = StandardCharsets.UTF_8.decode(byteBuffer).toString();
+           derived from https://stackoverflow.com/questions/17354891/java-bytebuffer-to-string/17355227
+
+         * Code to convert String to Byte[]: byte[] bytes = string.getBytes(StandardCharsets.UTF_8)
+           https://stackoverflow.com/questions/1536054/how-to-convert-byte-array-to-string-and-vice-versa
+
+         * Code to convert byte[] to String: String s = new String(byteArray, StandardCharsets.UTF_8)
+         */
+
         ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
-        byteBuffer.put(msg.getBytes());
-        // For updating the limit value, the value is updated to position for subsequent reads
+        //TODO sign the message before we send with the crypto primitive
+        byte[] signature = CryptoMethods.computeSignature(mySecretKey, msg); // don't we need to hold onto this return value?
+
+        if (signature == null) {
+            System.exit(0); // TODO The action to take if signature fails
+        }
+
+        String messageCombined = new String(msg, StandardCharsets.UTF_8)+ "PADDING" + new String(signature, StandardCharsets.UTF_8);
+        // To split messageCombined : decode from byte buffer form. Then messageCombined.split("PADDING").
+        byte[] messageToTransmit = messageCombined.getBytes();
+        byteBuffer.put(messageToTransmit);
         byteBuffer.flip();
         while(byteBuffer.hasRemaining()) {
-            //Write the data in the byte cache into the pipeline
+            // Write the data in the byte cache into the pipeline
             socketChannel.write(byteBuffer);
         }
     } /* sendMessage() */
 
-    public static byte[] computeHash(byte[] input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            md.update(input);
-            MessageDigest tc1 = (MessageDigest) md.clone();
-            byte[] toChapter1Digest = tc1.digest();
-            return toChapter1Digest;
-        }
-        catch (Exception e){
-            System.out.println("Problem generating digest");
-            e.printStackTrace();
-            return null;
-        }
-    } /* computeHash() */
-
-    public static boolean verifyHash(PublicKey publicKey, byte[] message, byte[] signature){
-        try {
-            Signature verify = Signature.getInstance("SHA512withECDSA");
-            verify.initVerify(publicKey);
-            verify.update(message);
-            boolean isVerified = verify.verify(signature);
-            return isVerified;
-        }
-        catch (Exception e){
-            e.printStackTrace();
-            return false;
-        }
-    } /* verifyHash() - verifies whether signature is authentic given the signature, message hash, and public key */
-
-    public static byte[] computeSignature(PrivateKey privateKey, byte[] message) {
-        /* takes as input a private key sk and a message and outputs a signature */
-        Signature sign;
-        try {
-            sign = Signature.getInstance("SHA512withECDSA");
-            sign.initSign(privateKey);
-            sign.update(message);
-            byte[] signArray = sign.sign();
-            return signArray;
-        }
-        catch (Exception e){
-            System.out.println("Trouble computing Signature");
-            e.printStackTrace();
-            return null;
-        }
-
-    } /* computeSignature() */
 
     public static byte[] readFile(String path) throws IOException {
 
@@ -234,21 +386,28 @@ public class JavaSecureChannel {
         }
         // Creating a BufferedReader object to read the file
         BufferedReader br = new BufferedReader(new FileReader(file));
-        String content = "", line;
+        StringBuilder content = new StringBuilder();
+        String line;
 
         // Iterate through each line of the file till we reach the last line
         while ((line = br.readLine()) != null) {
-            content = content + line;
+            content.append(line);
         }
-        return content.getBytes();
+        br.close();
+        return content.toString().getBytes();
     } /* readFile() */
 
     public static boolean verifyPath(String path) {
+        if (path == null)
+            return false;
         File tempFile = new File(path);
-        return tempFile.exists();
-    } /* verifyFileExists() */
+        return FileExists(tempFile);
+    } /* verifyPath() */
 
-    public static boolean FileExists(File file) {;
+    public static boolean FileExists(File file) {
+        if (file == null)
+            return false;
         return file.exists();
     } /* verifyFileExists() */
+
 }
