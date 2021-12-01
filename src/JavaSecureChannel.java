@@ -51,7 +51,7 @@ public class JavaSecureChannel {
     private static final int MAX_SIZE = 1024;
     private static final int HASHED_SIZE = 512;
     private static final int BUFFER_SIZE = 16384;
-
+    private static final boolean Verify_keys = false;
     private final String passwordsFilePath;
     private PrivateKey mySecretKey;
     private PublicKey theirPublicKey;
@@ -91,7 +91,9 @@ public class JavaSecureChannel {
             System.out.println("Key Factory is null - abort");
             System.exit(0);
         }
-
+        if (!Verify_keys) {
+            return;
+        }
         try {
             mySecretKey = kf.generatePrivate(new PKCS8EncodedKeySpec(readFile(myPrivateKeyFilepath)));
             theirPublicKey = kf.generatePublic(new X509EncodedKeySpec(readFile(theirPublicKeyFilepath)));
@@ -117,7 +119,7 @@ public class JavaSecureChannel {
     public static void main(String[] args) {
 
         if (args.length < 3) {
-            System.out.println("Please invoke with arguments [path to passwords.txt file], [filepath to other contractor's public key], [filepath to my secret key]");
+            System.out.println("Please invoke with arguments [path to passwords.txt file] [filepath to other contractor's public key] [filepath to my secret key]");
             System.exit(0);
         }
 //        JavaSecureChannel jsc = new JavaSecureChannel(port, args[0],args[1],args[2]);
@@ -176,13 +178,14 @@ public class JavaSecureChannel {
                 System.out.println("we have accepted a client");
                 try {
                     sendMessage(generatedSalt.getBytes(), socketChannel);
+                    System.out.println("Alice sent message");
                 } catch (IOException e) {
                     System.out.println("Unable to send message");
                     e.printStackTrace();
                     // TODO have appropriate action
                 }
                 while (true) {
-
+                    System.out.println("alice is waiting for bob to send his hash");
                     //ready to wait for bob to send his hash
                     // Clear cache data, new data can be received
                     byteBuffer.clear();
@@ -234,10 +237,12 @@ public class JavaSecureChannel {
             byteBuffer.clear();
             // Read the data from the pipe socketChannel into the cache byteBuffer
             // ReadSize denotes the number of bytes read
+            System.out.println("bob is waiting for salt message");
             int readSize = socketChannel.read(byteBuffer);
             if (readSize == -1) {
                 String salt = receiveMessage(byteBuffer.array());
 //                salt.getBytes(); //TODO is this the right way to cast?
+                System.out.println("bob is hashing");
                 myHash = hashFile(passwordsFilePath, salt.getBytes());
                 sendMessage(myHash,socketChannel);
                 break;
@@ -256,13 +261,20 @@ public class JavaSecureChannel {
         }
         socketChannel.close();
     } /* connectServer() */
-
-
+    public byte[] catBuffers(byte[] a, byte[] b) {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try {
+            outputStream.write(a);
+            outputStream.write(b);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return outputStream.toByteArray();
+    }
 /*from https://stackoverflow.com/questions/1741545/java-calculate-sha-256-hash-of-large-file-efficiently*/
-    public byte[] hashFile(String filepath, byte[] salt) throws IOException { //TODO create a hash of the password file
+    public byte[] hashFile(String filepath, byte[] salt) throws IOException {
+        byte[] hash = null;
 
-        byte[] partialHash = null;
-        byte[] buffer = new byte[BUFFER_SIZE];
         RandomAccessFile file = null;
         try {
             // RandomAccessFile file = new RandomAccessFile("T:\\someLargeFile.m2v", "r");
@@ -276,6 +288,7 @@ public class JavaSecureChannel {
             }
             if (hashSum == null) {
                 // TODO Action to take if hash is null
+                System.out.println("no hashsum algo available");
                 System.exit(0);
             }
             long read = 0;
@@ -285,9 +298,11 @@ public class JavaSecureChannel {
             int unitsize;
             while (read < offset) {
                 unitsize = (int) (((offset - read) >= BUFFER_SIZE) ? BUFFER_SIZE : (offset - read));
+                byte[] buffer = new byte[BUFFER_SIZE];
                 file.read(buffer, 0, unitsize);
                 try {
-                    hashSum.update(buffer, 0, unitsize);
+                    buffer = catBuffers(buffer, salt);
+                    hashSum.update(CryptoMethods.computeHash(buffer), 0, unitsize);
                 } catch (NullPointerException e) {
                     System.out.println("Null Pointer Detected - HashSum failed to update");
                     e.printStackTrace();
@@ -295,8 +310,8 @@ public class JavaSecureChannel {
                 read += unitsize;
             }
             // file.close();
-            partialHash = new byte[hashSum.getDigestLength()];
-            partialHash = hashSum.digest();
+            hash = new byte[hashSum.getDigestLength()];
+            hash = hashSum.digest();
         } catch (FileNotFoundException e) {
             System.out.println("The file to hash could not be found");
             e.printStackTrace();
@@ -305,7 +320,7 @@ public class JavaSecureChannel {
             if (file != null)
                 file.close();
         }
-        return partialHash;
+        return hash;
     } /* hashFile() */
 
     /* public static byte[][] genKeyPairBytes(int keySize) throws NoSuchAlgorithmException, NoSuchProviderException {
@@ -321,20 +336,27 @@ public class JavaSecureChannel {
     //Verify signature and return without the tag
     public String receiveMessage(byte[] msg) { //TODO either abort with a "not the person you think" or return the plaintext of the message
         //return the message without the little trailing signature verifier
+        System.out.println("receiving message");
         String combined = new String(msg, StandardCharsets.UTF_8);
-        String[] both = combined.split("PADDING");
-        byte[] hash = both[0].getBytes(StandardCharsets.UTF_8);
-        byte[] signature = both[1].getBytes(StandardCharsets.UTF_8);
-        boolean ver = CryptoMethods.verifyHash(theirPublicKey, hash, signature);
-        String answer;
-        if (ver) {
-            answer = both[0];
-            return answer;
-        }
-        else {
-            answer = "not the person you think";
-            System.out.println(answer);
-            System.exit(0);
+        if (Verify_keys) {
+            String[] both = combined.split("PADDING");
+            byte[] hash = both[0].getBytes(StandardCharsets.UTF_8);
+            byte[] signature = both[1].getBytes(StandardCharsets.UTF_8);
+
+
+            boolean ver = CryptoMethods.verifyHash(theirPublicKey, hash, signature);
+            String answer;
+            if (ver) {
+                answer = both[0];
+                return answer;
+            } else {
+                answer = "not the person you think";
+                System.out.println(answer);
+                System.exit(0);
+            }
+        } else {
+            System.out.println(new String(msg));
+            return new String(msg);
         }
         return null;
     }
@@ -353,16 +375,20 @@ public class JavaSecureChannel {
 
         ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
         //TODO sign the message before we send with the crypto primitive
-        byte[] signature = CryptoMethods.computeSignature(mySecretKey, msg); // don't we need to hold onto this return value?
+        if (Verify_keys) {
+            byte[] signature = CryptoMethods.computeSignature(mySecretKey, msg);
 
-        if (signature == null) {
-            System.exit(0); // TODO The action to take if signature fails
+            if (signature == null) {
+                System.exit(0); // TODO The action to take if signature fails
+            }
+
+            String messageCombined = new String(msg, StandardCharsets.UTF_8) + "PADDING" + new String(signature, StandardCharsets.UTF_8);
+            // To split messageCombined : decode from byte buffer form. Then messageCombined.split("PADDING").
+            byte[] messageToTransmit = messageCombined.getBytes();
+            byteBuffer.put(messageToTransmit);
+        } else {
+            byteBuffer.put(msg);
         }
-
-        String messageCombined = new String(msg, StandardCharsets.UTF_8)+ "PADDING" + new String(signature, StandardCharsets.UTF_8);
-        // To split messageCombined : decode from byte buffer form. Then messageCombined.split("PADDING").
-        byte[] messageToTransmit = messageCombined.getBytes();
-        byteBuffer.put(messageToTransmit);
         byteBuffer.flip();
         while(byteBuffer.hasRemaining()) {
             // Write the data in the byte cache into the pipeline
