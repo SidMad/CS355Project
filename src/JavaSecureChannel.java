@@ -1,23 +1,20 @@
-
-
-import java.io.BufferedInputStream;
-import java.io.FileInputStream;
-import java.io.File;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.*;
-import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.security.*;
 
 public class JavaSecureChannel {
 
     private static int port = 8081;
+    private static final int MAX_SIZE = 1024;
 
     private JavaSecureChannel(int port) {
         this.port = port;
     }
+
     public static void main(String[] args) {
         if (args.length < 1) {
             System.out.println("Please specify client or server");
@@ -54,11 +51,11 @@ public class JavaSecureChannel {
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
 
         // Binding port number
-        serverSocketChannel.bind(new InetSocketAddress(8081));
+        serverSocketChannel.bind(new InetSocketAddress(port));
 
 
         // Create a byte buffer The size of the buffer is 1024 bytes
-        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+        ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
 
         while (true) {
             System.out.println("-------Server side-----Start receiving-----Client Connection---------");
@@ -100,22 +97,27 @@ public class JavaSecureChannel {
         socketChannel.connect(new InetSocketAddress("localhost", port));
 
         //Create a byte buffer on the client side
-        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+        ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
 
         String msg = initialMessage; // TODO Get the message
 
-        //To the byte buffer, add data
-        byteBuffer.put(msg.getBytes());
-        // For updating the limit value, the value is updated to position for subsequent reads
-        byteBuffer.flip();
-        while(byteBuffer.hasRemaining()) {
-            //Write the data in the byte cache into the pipeline
-            socketChannel.write(byteBuffer);
-        }
-        socketChannel.close();
-    }
+        // Send message across the socket
+        sendMessage(msg, socketChannel);
 
-    public static void writeFileToSocket (String fileName) {
+        //To the byte buffer, add data
+//        byteBuffer.put(msg.getBytes());
+//        // For updating the limit value, the value is updated to position for subsequent reads
+//        byteBuffer.flip();
+//        while(byteBuffer.hasRemaining()) {
+//            //Write the data in the byte cache into the pipeline
+//            socketChannel.write(byteBuffer);
+//        }
+
+        // Close connection
+        socketChannel.close();
+    } /* connectServer() */
+
+    /* public static void writeFileToSocket (String fileName) {
         int sockPort = 400;
         FileInputStream fis = null;
         BufferedInputStream bis = null;
@@ -163,6 +165,90 @@ public class JavaSecureChannel {
                     System.out.println("Nothing");
                 }
         }
-    }
+    } /* writeFileToSocket() */
 
+    public static void sendMessage(String msg, SocketChannel socketChannel) throws IOException{
+        ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
+        byteBuffer.put(msg.getBytes());
+        // For updating the limit value, the value is updated to position for subsequent reads
+        byteBuffer.flip();
+        while(byteBuffer.hasRemaining()) {
+            //Write the data in the byte cache into the pipeline
+            socketChannel.write(byteBuffer);
+        }
+    } /* sendMessage() */
+
+    public static byte[] computeHash(byte[] input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(input);
+            MessageDigest tc1 = (MessageDigest) md.clone();
+            byte[] toChapter1Digest = tc1.digest();
+            return toChapter1Digest;
+        }
+        catch (Exception e){
+            System.out.println("Problem generating digest");
+            e.printStackTrace();
+            return null;
+        }
+    } /* computeHash() */
+
+    public static boolean verifyHash(PublicKey publicKey, byte[] message, byte[] signature){
+        try {
+            Signature verify = Signature.getInstance("SHA512withECDSA");
+            verify.initVerify(publicKey);
+            verify.update(message);
+            boolean isVerified = verify.verify(signature);
+            return isVerified;
+        }
+        catch (Exception e){
+            e.printStackTrace();
+            return false;
+        }
+    } /* verifyHash() - verifies whether signature is authentic given the signature, message hash, and public key */
+
+    public static byte[] computeSignature(PrivateKey privateKey, byte[] message) {
+        /* takes as input a private key sk and a message and outputs a signature */
+        Signature sign;
+        try {
+            sign = Signature.getInstance("SHA512withECDSA");
+            sign.initSign(privateKey);
+            sign.update(message);
+            byte[] signArray = sign.sign();
+            return signArray;
+        }
+        catch (Exception e){
+            System.out.println("Trouble computing Signature");
+            e.printStackTrace();
+            return null;
+        }
+
+    } /* computeSignature() */
+
+    public static byte[] readFile(String path) throws IOException {
+
+        File file = new File(path);
+        if(!FileExists(file)) {
+            System.out.println("Path to file incorrect");
+            throw new FileNotFoundException();
+        }
+        // Creating a BufferedReader object to read the file
+        BufferedReader br = new BufferedReader(new FileReader(file));
+        String content = "", line;
+
+        // Iterate through each line of the file till we reach the last line
+        while ((line = br.readLine()) != null) {
+            content = content + line;
+        }
+        return content.getBytes();
+    } /* readFile() */
+
+    public static boolean verifyPath(String path) {
+        File tempFile = new File(path);
+        return tempFile.exists();
+    } /* verifyFileExists() */
+
+    public static boolean FileExists(File file) {;
+        return file.exists();
+    } /* verifyFileExists() */
 }
