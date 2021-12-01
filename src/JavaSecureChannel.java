@@ -124,7 +124,7 @@ public class JavaSecureChannel {
         JavaSecureChannel jsc = new JavaSecureChannel(args[0],args[1],args[2]);
 
         try {
-            jsc.Bob("Connected to Server!");
+            jsc.Bob();
         } catch (ConnectException e) {
             System.out.println("Alice isn't out there, SAD! You're Alice");
             try {
@@ -221,9 +221,7 @@ public class JavaSecureChannel {
     }
 
     // client code
-    public void Bob(String initialMessage) throws IOException, ConnectException{
-
-        // @Andrew initialMessage is never used - Do we need it?
+    public void Bob() throws IOException, ConnectException{
 
         SocketChannel socketChannel = SocketChannel.open();
         socketChannel.connect(new InetSocketAddress("localhost", port));
@@ -269,8 +267,6 @@ public class JavaSecureChannel {
         try {
             // RandomAccessFile file = new RandomAccessFile("T:\\someLargeFile.m2v", "r");
             file = new RandomAccessFile(filepath, "r");
-
-            long startTime = System.nanoTime();
             MessageDigest hashSum = null;
             try {
                 hashSum = MessageDigest.getInstance("SHA-256");
@@ -301,8 +297,6 @@ public class JavaSecureChannel {
             // file.close();
             partialHash = new byte[hashSum.getDigestLength()];
             partialHash = hashSum.digest();
-            long endTime = System.nanoTime();
-            System.out.println("End time - Start time = " + (endTime - startTime) + " nano seconds");
         } catch (FileNotFoundException e) {
             System.out.println("The file to hash could not be found");
             e.printStackTrace();
