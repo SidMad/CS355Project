@@ -55,7 +55,7 @@ public class JavaSecureChannel {
     private final String passwordsFilePath;
     private PrivateKey mySecretKey;
     private PublicKey theirPublicKey;
-    boolean useSalt = false;
+    boolean useSalt = true;
 // private JavaSecureChannel(int port, String passwordsFilePath, String theirPublicKeyFilepath, String myPrivateKeyFilepath ) {
     private JavaSecureChannel(String passwordsFilePath, String theirPublicKeyFilepath, String myPrivateKeyFilepath ) {
 
@@ -273,6 +273,7 @@ public class JavaSecureChannel {
 /*from https://stackoverflow.com/questions/1741545/java-calculate-sha-256-hash-of-large-file-efficiently*/
     public byte[] hashFile(String filepath, byte[] salt) throws IOException {
         byte[] hash = null;
+        salt = new String(salt, StandardCharsets.UTF_8).trim().getBytes(StandardCharsets.UTF_8);
         System.out.println("my file is " + new String(readFile(filepath)));
         RandomAccessFile file = null;
         try {
