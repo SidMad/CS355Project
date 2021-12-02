@@ -147,16 +147,19 @@ public class JavaSecureChannel {
      * https://docs.oracle.com/javase/6/docs/technotes/guides/security/jaas/JAASRefGuide.html
      * Function to Read the data in the pipeline into the cache using socketChannel's read method
      */
-
+    public byte[] makeSalt()
+    {
+        byte[] salt = new byte[HASHED_SIZE];
+        new Random().nextBytes(salt);
+        return salt;
+    }
     public void Alice() throws IOException {
         // Server side, create Server Socket Channel through open method
         // Note that at this point, the server side has not yet bound the port.
 
         System.out.println("Alice is in play");
-        byte[] salt = new byte[HASHED_SIZE];
-        new Random().nextBytes(salt);
-
-        String generatedSalt  = new String(salt, StandardCharsets.UTF_8);
+        byte[] mySalt = makeSalt();
+        String generatedSalt  = new String(mySalt, StandardCharsets.UTF_8);
         System.out.println("generated salt is " + generatedSalt);
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
         SocketChannel socketChannel = null;
@@ -178,32 +181,30 @@ public class JavaSecureChannel {
                 System.out.println("we have accepted a client");
                 try {
                    // byte[] salt = generatedSalt.getBytes(StandardCharsets.UTF_8);
-                    sendMessage(generatedSalt.getBytes(StandardCharsets.UTF_8), socketChannel);
-                    System.out.println("Alice sent message");
+                    sendMessage(mySalt, socketChannel);
+                    System.out.println("Alice sent her salt");
                 } catch (IOException e) {
                     System.out.println("Unable to send message");
                     e.printStackTrace();
                     // TODO have appropriate action
                 }
                 while (true) { //this is so we hang and wait for another client if someone malicious poses as bob
-
-                    System.out.println("alice is waiting for bob to send his hash");
+                    System.out.println("alice is waiting for bob to send his salt");
                     //ready to wait for bob to send his hash
-                    // Clear cache data, new data can be received
                     byteBuffer.clear();
-                    // Read the data from the pipe socketChannel into the cache byteBuffer
-                    // ReadSize denotes the number of bytes read
                     int readSize = socketChannel.read(byteBuffer);
-                     // Should if condition be readSize != -1
-                        // Abort or return plaintext
-                        String receivedHash = receiveMessage(byteBuffer.array());
+                    String hisSalt = receiveMessage(byteBuffer.array());
+                    byte[] myHash = hashFile(passwordsFilePath, hisSalt.getBytes(StandardCharsets.UTF_8));
+                    // Send hash and signature to Bob
+                    System.out.println("my hash is " + new String(myHash,StandardCharsets.UTF_8));
+                    sendMessage(myHash,socketChannel);
+                    byteBuffer = ByteBuffer.allocate(MAX_SIZE);
+                    readSize = socketChannel.read(byteBuffer);
+                    String hisHash = receiveMessage(byteBuffer.array());
                         // Hash the password file
-                        byte[] passwords = hashFile(passwordsFilePath, salt);
-                        // Send hash and signature to Bob
-                    System.out.println("my hash is " + new String(passwords,StandardCharsets.UTF_8));
-                        sendMessage(passwords,socketChannel);
+
                         // Compare the hashes and print appropriate message
-                        finishProtocol(new String(passwords, StandardCharsets.UTF_8), receivedHash);
+                        finishProtocol(new String(hashFile(passwordsFilePath, mySalt), StandardCharsets.UTF_8), hisHash);
                 }
             }
             // try {
@@ -229,7 +230,8 @@ public class JavaSecureChannel {
 
     // client code
     public void Bob() throws IOException, ConnectException{
-
+//ThierSalt makes Myhash
+        //Mysalt makes their hash
         SocketChannel socketChannel = SocketChannel.open();
         socketChannel.connect(new InetSocketAddress("localhost", port));
         ByteBuffer byteBuffer = ByteBuffer.allocate(MAX_SIZE);
@@ -242,23 +244,23 @@ public class JavaSecureChannel {
             // ReadSize denotes the number of bytes read
             System.out.println("bob is waiting for salt message");
             socketChannel.read(byteBuffer);
+            byte[] mySalt = makeSalt();
             System.out.println("Bob's socket got a message");
-            String salt = receiveMessage(byteBuffer.array());
-//                salt.getBytes(); //TODO is this the right way to cast?
-
-            System.out.println("bob is hashing with salt " + salt);
-
-            byte[] myHash = hashFile(passwordsFilePath, salt.getBytes());
-
-            System.out.println("My hash is " + new String(myHash, StandardCharsets.UTF_8));
-            sendMessage(myHash,socketChannel);
+            String theirsalt = receiveMessage(byteBuffer.array());
+            System.out.println("sending my salt");
+            sendMessage(mySalt, socketChannel);
+            System.out.println("bob is hashing with their salt " + theirsalt);
 
             //Wait for final message to finish off protocol
             // Clear cache data, new data can be received
             byteBuffer = ByteBuffer.allocate(MAX_SIZE);
             int readSize = socketChannel.read(byteBuffer);
-            finishProtocol(new String(myHash, StandardCharsets.UTF_8), receiveMessage(byteBuffer.array()));
-        socketChannel.close();
+            String theirHash = receiveMessage(byteBuffer.array());
+            byte[] myHash = hashFile(passwordsFilePath, theirsalt.getBytes());
+            System.out.println("My hash is " + new String(myHash, StandardCharsets.UTF_8));
+            sendMessage(myHash,socketChannel);
+            finishProtocol(new String(hashFile(passwordsFilePath, mySalt), StandardCharsets.UTF_8), theirHash);
+            socketChannel.close();
     } /* connectServer() */
     public byte[] catBuffers(byte[] a, byte[] b) {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
